@@ -17,6 +17,7 @@ public class Node2Id {
     Map<String, Integer> entity2id, relation2Id;
     ArrayList<Triple<Integer, Integer, Integer>> tripleIds;
     ArrayList<Integer> headList, lableList, tailList;
+    int entitySize, relationSize;
 
 
     public Node2Id(ArrayList<String> entityList, ArrayList<String> relationList, ArrayList<Triple<String, String, String>> tripleList){
@@ -28,6 +29,8 @@ public class Node2Id {
         this.lableList = new ArrayList<Integer>();
         this.tailList = new ArrayList<Integer>();
         splitTripleIds();
+        this.entitySize = entityList.size();
+        this.relationSize = relationList.size();
 
     }
 
@@ -98,5 +101,12 @@ public class Node2Id {
         return relation2Id;
     }
 
+    public int getEntitySize() {
+        return entitySize;
+    }
+
+    public int getRelationSize() {
+        return relationSize;
+    }
 }
 

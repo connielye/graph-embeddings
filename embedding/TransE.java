@@ -1,34 +1,30 @@
 package com.prime.common.embedding;
 
+import com.prime.common.computinghelper.Helper;
+import com.prime.common.computinghelper.NegativeSampling;
+import com.prime.common.io.*;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
-import org.json.simple.JSONObject;
+import org.apache.log4j.Logger;
 
-import java.io.FileWriter;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Random;
-import java.util.logging.Logger;
+import java.util.*;
 
 /**
- * TransE algorithm
+ * TransE algorithm -- basic graph embedding
  *
  */
 
 public class TransE {
 
-    final static Logger logger = Logger.getLogger(TransE.class.getName());
-    ComputeHelper helper;
-    ArrayList<Integer> entityList;
-    ArrayList<Integer> relationList;
-    ArrayList<ArrayList<Double>> relationVectors;
-    ArrayList<ArrayList<Double>> entityVectors;
-
-    public TransE(ArrayList<Integer> entityList, ArrayList<Integer> relationList){
-        this.helper = new ComputeHelper();
-        this.entityList = entityList;
-        this.relationList = relationList;
-
+    final static Logger logger = Logger.getLogger(TransE.class);
+    Helper helper;
+    NegativeSampling sample;
+    ArrayList<double[]> relationVectors;
+    ArrayList<double[]> entityVectors;
+    public TransE(){
+        this.helper = new Helper();
+        this.sample = new NegativeSampling();
     }
 
     /**
@@ -36,57 +32,22 @@ public class TransE {
      * @param k
      */
 
-    private void initialize (int k){
-        relationVectors = new ArrayList<ArrayList<Double>>();
-        entityVectors = new ArrayList<ArrayList<Double>>();
-        for (int i = 0; i < relationList.size(); i ++){
-            ArrayList<Double> lVector = helper.initVector(k);
-            ArrayList<Double> normedlVector = helper.norm(lVector);
+    private void initialize (int entitySize, int relationSize, int k){
+        relationVectors = new ArrayList<double[]>();
+        entityVectors = new ArrayList<double[]>();
+        for (int i = 0; i < relationSize; i ++){
+            double[] lVector = helper.initVector(k);
+            double[] normedlVector = helper.norm(lVector);
             relationVectors.add(normedlVector);
         }
 
-        for (int j = 0; j < entityList.size(); j++){
-            ArrayList<Double> eVector = helper.initVector(k);
-            ArrayList<Double> normedeVector = helper.norm(eVector);
+        for (int j = 0; j < entitySize; j++){
+            double[] eVector = helper.initVector(k);
+            double[] normedeVector = helper.norm(eVector);
             entityVectors.add(normedeVector);
         }
     }
 
-    /**
-     * generate Tbatch which contains pair triple and its corrupted triple
-     * @param triples
-     * @return Tbatch
-     */
-
-    private ArrayList<Pair<Triple<Integer, Integer, Integer>, Triple<Integer, Integer, Integer>>> generateTBatch(ArrayList<Triple<Integer, Integer, Integer>> triples){
-        ArrayList<Pair<Triple<Integer, Integer, Integer>, Triple<Integer, Integer, Integer>>> tBatch = new ArrayList<Pair<Triple<Integer, Integer, Integer>, Triple<Integer, Integer, Integer>>>();
-        Random random = new Random();
-        for (int i = 0; i < triples.size(); i++){
-            Triple<Integer, Integer, Integer> triple = triples.get(i);
-            Boolean flag = random.nextBoolean();
-            if(flag == true){
-                int head = triple.getLeft();
-                int randEntity = random.nextInt(entityList.size());
-                while (randEntity == head){
-                    randEntity = random.nextInt(entityList.size());
-                }
-                Triple<Integer, Integer, Integer> corruptedTriple = Triple.of(randEntity, triple.getMiddle(), triple.getRight());
-                Pair<Triple<Integer, Integer, Integer>, Triple<Integer, Integer, Integer>> pair = Pair.of(triple, corruptedTriple);
-                tBatch.add(pair);
-            }
-            if(flag == false){
-                int tail = triple.getRight();
-                int randEntity = random.nextInt(entityList.size());
-                while (randEntity == tail){
-                    randEntity = random.nextInt(entityList.size());
-                }
-                Triple<Integer, Integer, Integer> corruptedTriple = Triple.of(triple.getLeft(), triple.getMiddle(), randEntity);
-                Pair<Triple<Integer, Integer, Integer>, Triple<Integer, Integer, Integer>> pair = Pair.of(triple, corruptedTriple);
-                tBatch.add(pair);
-            }
-        }
-        return tBatch;
-    }
 
     /**
      * sgd
@@ -98,51 +59,51 @@ public class TransE {
      */
 
     private void update(ArrayList<Pair<Triple<Integer, Integer, Integer>, Triple<Integer, Integer, Integer>>> tBatch, double margin, double learningRate, Boolean L1, int k){
-        ArrayList<ArrayList<Double>> copyEntityVectors = (ArrayList<ArrayList<Double>>) entityVectors.clone();
-        ArrayList<ArrayList<Double>> copyRelationVectors = (ArrayList<ArrayList<Double>>) relationVectors.clone();
+       ArrayList<double[]> copyEntityVectors = (ArrayList<double[]>) entityVectors.clone();
+        ArrayList<double[]> copyRelationVectors = (ArrayList<double[]>) relationVectors.clone();
 
         for (int i = 0; i<tBatch.size(); i++){
             int head = tBatch.get(i).getLeft().getLeft();
             int label = tBatch.get(i).getLeft().getMiddle();
             int tail = tBatch.get(i).getLeft().getRight();
-            ArrayList<Double> headVector = copyEntityVectors.get(head);
-            ArrayList<Double> labelVector = copyRelationVectors.get(label);
-            ArrayList<Double> tailVector = copyEntityVectors.get(tail);
+            double[] headVector = copyEntityVectors.get(head);
+            double[] labelVector = copyRelationVectors.get(label);
+            double[] tailVector = copyEntityVectors.get(tail);
             double distanceL1 = helper.distanceL1(headVector, labelVector, tailVector, k);
             double distanceL2 = helper.distanceL2(headVector, labelVector, tailVector, k);
 
             int headC = tBatch.get(i).getRight().getLeft();
             int labelC = tBatch.get(i).getRight().getMiddle();
             int tailC = tBatch.get(i).getRight().getRight();
-            ArrayList<Double> headCVector = copyEntityVectors.get(headC);
-            ArrayList<Double> labelCVector = copyRelationVectors.get(labelC);
-            ArrayList<Double> tailCVector = copyEntityVectors.get(tailC);
+            double[] headCVector = copyEntityVectors.get(headC);
+            double[] labelCVector = copyRelationVectors.get(labelC);
+            double[] tailCVector = copyEntityVectors.get(tailC);
             double distanceCL1 = helper.distanceL1(headCVector, labelCVector, tailCVector, k);
             double distanceCL2 = helper.distanceL2(headCVector, labelCVector, tailCVector, k);
 
-            ArrayList<Double> calculusVector = new ArrayList<Double>();
-            ArrayList<Double> calculusCVector = new ArrayList<Double>();
+            ArrayList<Double> deltaVector = new ArrayList<Double>();
+            ArrayList<Double> deltaCVector = new ArrayList<Double>();
             if (L1 == true ){
                 double lossL1 = margin + distanceL1 - distanceCL1;
                 if (lossL1 > 0){
                     for (int j = 0; j < k; j++){
-                        double temp = tailVector.get(j) - headVector.get(j) - labelVector.get(j);
-                        double calculus ;
-                        double calculusC;
+                        double temp = tailVector[j] - headVector[j] - labelVector[j];
+                        double delta;
+                        double deltaC;
                         if (temp >= 0){
-                            calculus = 1d;
-                            calculusVector.add(calculus);
+                            delta = 1d; // first step chain rule
+                            deltaVector.add(delta);
                         } else{
-                            calculus = -1d;
-                            calculusVector.add(calculus);
+                            delta = -1d; // first step chain rule
+                            deltaVector.add(delta);
                         }
-                        double tempC = tailCVector.get(j) - headCVector.get(j) - labelCVector.get(j);
+                        double tempC = tailCVector[j] - headCVector[j] - labelCVector[j];
                         if (tempC >= 0){
-                            calculusC = 1d;
-                            calculusCVector.add(calculusC);
+                            deltaC = 1d; // first step chain rule
+                            deltaCVector.add(deltaC);
                         } else {
-                            calculusC = 0d;
-                            calculusCVector.add(calculusC);
+                            deltaC = -1d; // first step chain rule
+                            deltaCVector.add(deltaC);
                         }
                     }
                 }
@@ -150,70 +111,34 @@ public class TransE {
                 double lossL2 = margin + distanceL2 - distanceCL2;
                 if (lossL2 > 0) {
                     for (int m = 0; m < k; m++) {
-                        double calculus = 2 * (tailVector.get(m) - headVector.get(m) - labelVector.get(m));
-                        double calculusC = 2 * (tailCVector.get(m) - headCVector.get(m) - labelCVector.get(m));
-                        calculusVector.add(calculus);
-                        calculusCVector.add(calculusC);
+                        double delta = 2 * (tailVector[m] - headVector[m] - labelVector[m]); // first step chain rule
+                        double deltaC = 2 * (tailCVector[m] - headCVector[m] - labelCVector[m]); // first step chain rule
+                        deltaVector.add(delta);
+                        deltaCVector.add(deltaC);
                     }
                 }
             }
-
-            for (int n = 0; n < k; n ++){
-                double newHead = headVector.get(n) + learningRate * calculusVector.get(n);
-                double newLable = labelVector.get(n) + learningRate * (calculusVector.get(n) - calculusCVector.get(n));
-                double newTail = tailVector.get(n) - learningRate * calculusVector.get(n);
-                headVector.set(n, newHead);
-                labelVector.set(n, newLable);
-                tailVector.set(n, newTail);
+            if (deltaVector.size() != 0) {
+                for (int n = 0; n < k; n++) {
+                    double newHead = headVector[n] + learningRate * deltaVector.get(n);
+                    double newLable = labelVector[n] + learningRate * (deltaVector.get(n) - deltaCVector.get(n));
+                    double newTail = tailVector[n] - learningRate * deltaVector.get(n);
+                    headVector[n] = newHead;
+                    labelVector[n] = newLable;
+                    tailVector[n] = newTail;
+                }
+                double[] normedHeadVector = helper.norm(headVector);
+                double[] normedLabelVector = helper.norm(labelVector);
+                double[] normedTailVector = helper.norm(tailVector);
+                copyEntityVectors.set(head, normedHeadVector);
+                copyRelationVectors.set(label, normedLabelVector);
+                copyEntityVectors.set(tail, normedTailVector);
             }
-            ArrayList<Double> normedHeadVector = helper.norm(headVector);
-            ArrayList<Double> normedLabelVector = helper.norm(labelVector);
-            ArrayList<Double> normedTailVector = helper.norm(tailVector);
-            copyEntityVectors.set(head, normedHeadVector);
-            copyRelationVectors.set(label, normedLabelVector);
-            copyEntityVectors.set(tail, normedTailVector);
         }
         entityVectors = copyEntityVectors;
         relationVectors = copyRelationVectors;
     }
 
-    /**
-     * learning vectors
-     * @param trainTriple
-     * @param devTriple
-     * @param learningRate
-     * @param margin
-     * @param k
-     * @param L1
-     * @param batchSize
-     * @param epochs
-     * @param entityOutput
-     * @param relationOutput
-     * @throws IOException
-     */
-    public void learn(ArrayList<Triple<Integer, Integer, Integer>> trainTriple, ArrayList<Triple<Integer, Integer, Integer>> devTriple, double learningRate, double margin,
-                      int k, Boolean L1, int batchSize, int epochs, String entityOutput, String relationOutput) throws IOException{
-        initialize(k);
-        for (int epoch =0; epoch < epochs; epoch ++){
-            int trainSize = trainTriple.size();
-            int batchNumber = Math.round(trainSize/batchSize);
-
-            for (int i = 0; i < batchNumber; i ++){
-                ArrayList<Triple<Integer, Integer, Integer>> sBatch = helper.sample(trainTriple, batchSize);
-                ArrayList<Pair<Triple<Integer, Integer, Integer>, Triple<Integer, Integer, Integer>>> tBatch = generateTBatch(sBatch);
-                update(tBatch, margin, learningRate, L1, k);
-            }
-            logger.info("Epoch: " + epoch);
-
-            if(devTriple != null){
-                double accuracy = validation(devTriple, L1, k, margin);
-                logger.info("Validation Accuracy: " + accuracy + "; Epoch: " + epoch);
-            }
-        }
-        writeEntityVector(entityOutput);
-        writeRelationVector(relationOutput);
-
-    }
 
     /**
      * validate the result on dev set after each epoch
@@ -221,15 +146,15 @@ public class TransE {
      * @return accuracy
      */
 
-    private Double validation(ArrayList<Triple<Integer, Integer, Integer>> devTriple, Boolean L1, int k, double margin){
+    private double validation(ArrayList<Triple<Integer, Integer, Integer>> devTriple, Boolean L1, int k, double margin){
         int count = 0;
         for (int i = 0; i < devTriple.size(); i++){
             int headId = devTriple.get(i).getLeft();
             int labelId = devTriple.get(i).getMiddle();
             int tailId = devTriple.get(i).getRight();
-            ArrayList<Double> headVector = entityVectors.get(headId);
-            ArrayList<Double> labelVector = relationVectors.get(labelId);
-            ArrayList<Double> tailVector = entityVectors.get(tailId);
+            double[] headVector = entityVectors.get(headId);
+            double[] labelVector = relationVectors.get(labelId);
+            double[] tailVector = entityVectors.get(tailId);
             double distance;
             if (L1 == true){
                 distance = helper.distanceL1(headVector, labelVector, tailVector, k);
@@ -245,36 +170,75 @@ public class TransE {
     }
 
     /**
-     * save the entity vectors in json file in local disk after learning
+     * save serialized trained model in local disk after learning
      * @param entityOutput
      * @throws IOException
      */
-    private void writeEntityVector(String entityOutput) throws IOException {
-        JSONObject obj = new JSONObject();
-        for (int i =0; i< entityVectors.size(); i ++){
-            obj.put(entityList.get(i), entityVectors.get(i));
+
+    private void saveModel(String entityOutput, String relationOutput, Map<String, Integer> entity2Id, Map<String, Integer> relation2Id){
+        Map<String, double[]> entityMap = new HashMap<String, double[]>();
+        Map<String, double[]> relationMap = new HashMap<String, double[]>();
+        Iterator iteratorEntity = entity2Id.entrySet().iterator();
+        while (iteratorEntity.hasNext()){
+            Map.Entry entry = (Map.Entry)iteratorEntity.next();
+            String entityName = entry.getKey().toString();
+            int entityId = Integer.parseInt(entry.getValue().toString());
+            entityMap.put(entityName, entityVectors.get(entityId));
+        }
+        Iterator iteratorRelation = relation2Id.entrySet().iterator();
+        while (iteratorRelation.hasNext()){
+            Map.Entry entry = (Map.Entry)iteratorRelation.next();
+            String relationName = entry.getKey().toString();
+            int relationId = Integer.parseInt(entry.getValue().toString());
+            relationMap.put(relationName, relationVectors.get(relationId));
         }
 
-        FileWriter file = new FileWriter(entityOutput);
-        file.write(obj.toJSONString());
+        SerializeModelVectors modelEntity = new SerializeModelVectors(entityMap);
+        WriteModel writer = new WriteModel();
+        writer.write(entityOutput, modelEntity);
+
+        SerializeModelVectors modelRelation = new SerializeModelVectors(relationMap);
+        writer.write(relationOutput, modelRelation);
+
+
     }
 
     /**
-     * save the relation vectors in json file in local disk after learning
+     * learning phase and cross validation
+     * @param trainTriple
+     * @param devTriple
+     * @param learningRate
+     * @param margin
+     * @param k
+     * @param L1
+     * @param batchSize
+     * @param epochs
+     * @param entityOutput
      * @param relationOutput
      * @throws IOException
      */
-    private void writeRelationVector(String relationOutput) throws IOException{
-        JSONObject obj = new JSONObject();
-        for(int i = 0; i < relationVectors.size(); i ++){
-            obj.put(relationList.get(i), relationVectors.get(i));
+    public void learn(ArrayList<Triple<Integer, Integer, Integer>> trainTriple, ArrayList<Triple<Integer, Integer, Integer>> devTriple, int entitySize, int relationSize, Map<String, Integer> entity2Id,
+                      Map<String, Integer> relation2Id, double learningRate, double margin, int k, Boolean L1, int batchSize, int epochs, String entityOutput, String relationOutput) throws IOException{
+        initialize(entitySize, relationSize, k);
+        for (int epoch =0; epoch < epochs; epoch ++){
+            int trainSize = trainTriple.size();
+            int batchNumber = Math.round(trainSize/batchSize);
+
+            for (int i = 0; i < batchNumber; i ++){
+                ArrayList<Triple<Integer, Integer, Integer>> sBatch = helper.sample(trainTriple, batchSize);
+                ArrayList<Pair<Triple<Integer, Integer, Integer>, Triple<Integer, Integer, Integer>>> tBatch = sample.generateUnif(sBatch, entitySize);
+                update(tBatch, margin, learningRate, L1, k);
+            }
+            logger.info("Epoch: " + epoch);
+
+            if(devTriple != null){
+                double accuracy = validation(devTriple, L1, k, margin);
+                logger.info("Validation Accuracy: " + accuracy + "; Epoch: " + epoch);
+            }
         }
+        saveModel(entityOutput, relationOutput, entity2Id, relation2Id);
 
-        FileWriter file = new FileWriter(relationOutput);
-        file.write(obj.toJSONString());
     }
-
-
 
 
 }
